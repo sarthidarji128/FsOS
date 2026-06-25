@@ -1,40 +1,99 @@
-# FsOS
+# FsOS User Manual & Usage Guide
 
-1. Purpose
-FsOS appears to be a learning project aimed at developing a minimal operating system from scratch. It focuses on fundamental OS components like kernel initialization, basic input/output drivers (VGA and keyboard), and building a bootable ISO image. The project likely serves as an educational tool for understanding OS development principles.
+This guide walks you through setting up, booting, and operating your custom **FsOS** hypervisor ISO.
 
-2. Key Features
-VGA Driver: Provides functionality to initialize the VGA text mode buffer and print messages or individual characters to the screen.
-Keyboard Driver: Implements a basic function to read character input from a UART device, presumably connected to a keyboard.
-Kernel Entry Point: Defines kernel_main as the primary entry point for the operating system, handling initialization and the main loop.
-Bootable ISO Creation: Includes a build script to compile the kernel and drivers, create a GRUB bootloader, and package everything into a bootable ISO image.
-QEMU Emulation: The build script also includes a command to run the created ISO in QEMU for testing.
-3. Technology Stack
-Languages:
-C (for kernel and driver implementation)
-Assembly (likely for boot.S, though not provided in the context)
-Markdown (for README)
-Shell (for build script)
-Tools:
-aarch64-linux-gnu-gcc: Cross-compiler for ARM 64-bit architecture.
-aarch64-linux-gnu-ld: Cross-linker for ARM 64-bit architecture.
-xorriso, grub-efi-arm64-bin, mtools, qemu-system-aarch64: Tools for creating bootable ISOs and emulation.
-grub-mkimage, grub-mkrescue: GRUB tools for building bootloaders and ISO images.
-4. Architecture
-The repository follows a typical OS structure:
+---
 
-src/ directory: Contains the core source code.
-drivers/: Houses hardware-specific drivers (VGA, keyboard).
-boot.S (assumed): Likely contains the initial bootloader code.
-kernel.c: Implements the main kernel logic.
-link.ld: Linker script for defining the memory layout of the kernel.
-build.sh: A shell script orchestrates the entire build process, from compilation to ISO creation and emulation.
-iso/ directory: Created during the build process, this directory serves as the staging area for the ISO image content, including the bootloader and kernel.
-5. Getting Started
-To build and run FsOS:
+## 1. Setting Up Your Virtual Machine (VM)
 
-Prerequisites: Ensure you have the necessary build tools installed (e.g., xorriso, grub-efi-arm64-bin, mtools, qemu-system-aarch64, and the aarch64-linux-gnu toolchain). The build.sh script attempts to install some of these.
-Execute Build Script: Run the build.sh script from the root of the repository:
-[object Object]
-Run in QEMU: The script will automatically attempt to run the generated FsOS.iso in QEMU. If not, you can manually run it using:
-qemu-system-aarch64 -machine virt -cpu cortex-a57 -smp 2 -m 512M -nographic -bios /usr/share/qemu-efi-aarch64/QEMU_EFI.fd -cdrom FsOS.iso
+To run the `FsOS.iso`, you need a hypervisor software (like **VirtualBox**, **VMware Fusion**, or **UTM**). Configure your VM using the following specifications:
+
+*   **OS Type**: Linux (Choose "Other Linux 64-bit" or "Alpine Linux 64-bit").
+*   **RAM**: At least **2 GB (2048 MB)**. Since FsOS downloads target OS ISOs directly into RAM, less than 2 GB will prevent you from downloading Ubuntu or Kali Linux.
+*   **CPU**: 2 Cores.
+*   **Nested Virtualization (Crucial)**: If your VM software supports it, enable **Nested Virtualization** (e.g., VT-x/AMD-V passthrough). This allows the QEMU emulator inside FsOS to run virtual machines at full speed.
+*   **Network**: Set the network adapter to **NAT** or **Bridged** with DHCP active. FsOS must be able to fetch packages and ISOs from the web.
+*   **Storage**: Add a virtual hard disk (e.g., 10 GB) if you want FsOS to detect physical drives, and mount `FsOS.iso` in the CD/DVD drive.
+
+---
+
+## 2. Booting FsOS
+
+1. Start your VM with `FsOS.iso` mounted.
+2. The bootloader will launch quickly (configured with a 5-second timeout).
+3. The system will auto-login as `root` and initialize the FsOS program. 
+4. You will see the FsOS dashboard displaying your current system parameters:
+   ```text
+   ========================================
+             Welcome to FsOS               
+   ========================================
+     RAM: 2048MB | CPU: x86_64
+   ========================================
+   Please select an option:
+     1. Connect to the network (DHCP)
+     2. Choose & Download Target OS
+     3. Launch Target OS in QEMU
+     4. View Hardware Diagnostics
+     5. Drop to root shell
+     6. Reboot
+   ```
+
+---
+
+## 3. Step-by-Step Operations
+
+### Step 1: Connect to the Network
+Before you can download any operating system or run QEMU, FsOS must be connected to the internet.
+1. Select **Option 1**.
+2. FsOS will run `udhcpc -i eth0` to request an IP address from your hypervisor's virtual DHCP server.
+3. Once you see `[+] Network setup complete`, press **Enter** to return to the menu.
+
+### Step 2: Choose & Download Target OS
+1. Select **Option 2** to open the OS selection submenu.
+2. Choose from the available options:
+   *   **1. ReactOS**: An open-source clone of Windows. (Requires 512MB RAM minimum).
+   *   **2. Ubuntu Linux**: A standard Linux distribution. (Requires 2GB RAM minimum).
+   *   **3. Kali Linux**: A penetration testing distribution. (Requires 2GB RAM minimum).
+3. **Hardware Assessment**: FsOS will evaluate your system. If your RAM is too low, it will trigger a warning. If you try to run ReactOS on an ARM64 CPU (aarch64), it will warn you that ReactOS is only supported on x86 computers.
+4. **Architecture-Aware Download**: If you run FsOS on a standard Intel/AMD computer, it downloads the `x86_64` (64-bit PC) installer. If it detects you are running on an Apple Silicon M-series chip (using UTM on macOS), it will automatically change its query to download the `ARM64` installer.
+5. The download progress bar will output. The download is stored at `/tmp/target_os.iso`.
+
+### Step 3: Launch the Virtual Machine in QEMU
+1. Select **Option 3**.
+2. **QEMU Auto-Installer**: If QEMU is not yet present on your bootable ISO, FsOS will automatically configure Alpine's package repositories, contact the servers, and download/install `qemu-system` in the background.
+3. **Console Redirection**: Since FsOS runs as a lightweight terminal-only OS, QEMU is initiated in `-nographic` mode. This redirects the guest system's serial text console directly to your terminal.
+4. **How to exit QEMU**: When QEMU takes over the screen, your keyboard is redirected to the virtual machine. To terminate the VM and return to the FsOS menu:
+   *   Press **`Ctrl + A`** on your keyboard, release, and then press **`X`**.
+   *   This is the standard QEMU terminal escape sequence.
+
+### Step 4: Hardware Diagnostics
+1. Select **Option 4**.
+2. This displays a detailed audit of the system:
+   *   **CPU Architecture**: Shows if your processor is `x86_64` or `aarch64`.
+   *   **Virtualization**: Indicates if hardware-accelerated KVM is active. (KVM allows the QEMU guest to run at near-native CPU speeds).
+   *   **System RAM**: Displays total RAM in megabytes.
+   *   **Storage Disks**: Scans for active physical disks (like `/dev/sda` or `/dev/vda`).
+
+### Step 5: Maintenance Shell
+1. Select **Option 5** to drop out of the FsOS program.
+2. You will be given a raw Linux shell prompt (`localhost:~#`). You can run standard Linux utilities here.
+3. To return to the FsOS control panel, type:
+   ```bash
+   exit
+   ```
+
+---
+
+## 4. Advanced Customization
+
+If you want to edit the menu or add your own target ISO download paths:
+1. Boot FsOS.
+2. Drop to the shell (**Option 5**).
+3. Open the entrypoint script in the text editor:
+   ```bash
+   vi /etc/local.d/fsos.start
+   ```
+4. Make your changes, save, and commit the changes to your persistent configuration overlay:
+   ```bash
+   lbu commit
+   ```

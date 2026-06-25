@@ -1,0 +1,260 @@
+#!/bin/sh
+# This script is executed automatically on boot by local.d
+# It acts as our FsOS entrypoint.
+
+# Global hardware info variables
+CPU_ARCH=""
+CPU_VIRT="No"
+TOTAL_RAM_MB=0
+DISKS_DETECTED=""
+
+detect_hardware() {
+    # 1. Detect Architecture
+    CPU_ARCH=$(uname -m)
+
+    # 2. Detect CPU Virtualization
+    if grep -qE "vmx|svm" /proc/cpuinfo 2>/dev/null; then
+        CPU_VIRT="Yes (KVM Acceleration Available)"
+    else
+        CPU_VIRT="No (KVM Acceleration Unavailable)"
+    fi
+
+    # 3. Detect RAM
+    if [ -f /proc/meminfo ]; then
+        TOTAL_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+        TOTAL_RAM_MB=$((TOTAL_KB / 1024))
+    else
+        TOTAL_RAM_MB=0
+    fi
+
+    # 4. Detect Disks
+    DISKS_DETECTED=""
+    if [ -d /sys/block ]; then
+        for disk in /sys/block/sd* /sys/block/vd* /sys/block/nvme*; do
+            if [ -e "$disk" ]; then
+                name=$(basename "$disk")
+                size_sectors=$(cat "$disk/size" 2>/dev/null || echo 0)
+                size_gb=$((size_sectors * 512 / 1024 / 1024 / 1024))
+                DISKS_DETECTED="${DISKS_DETECTED}/dev/$name (${size_gb}GB) "
+            fi
+        done
+    fi
+    if [ -z "$DISKS_DETECTED" ]; then
+        DISKS_DETECTED="None detected"
+    fi
+}
+
+show_hardware_report() {
+    clear
+    echo "========================================"
+    echo "       FsOS Hardware Diagnostic         "
+    echo "========================================"
+    echo ""
+    echo "  CPU Architecture:  $CPU_ARCH"
+    echo "  Virtualization:    $CPU_VIRT"
+    echo "  System RAM:        ${TOTAL_RAM_MB} MB"
+    echo "  Storage Disks:     $DISKS_DETECTED"
+    echo ""
+    echo "========================================"
+    echo "Press Enter to return to main menu..."
+    read -r
+}
+
+download_os() {
+    detect_hardware
+    clear
+    echo "========================================"
+    echo "        Select Operating System         "
+    echo "========================================"
+    echo "  1. ReactOS (Open Source Windows Clone)"
+    echo "     - Requires: 512MB RAM, x86/x86_64"
+    echo "  2. Ubuntu Linux (Standard Server/Netboot)"
+    echo "     - Requires: 2GB RAM, x86_64/ARM64"
+    echo "  3. Kali Linux (Penetration Testing)"
+    echo "     - Requires: 2GB RAM, x86_64/ARM64"
+    echo "  4. Back to Main Menu"
+    echo ""
+    printf "Enter your choice [1-4]: "
+    read -r os_choice
+
+    case "$os_choice" in
+        1)
+            # ReactOS is only x86 32-bit (runs on x86_64 too)
+            if [ "$CPU_ARCH" != "x86_64" ] && [ "$CPU_ARCH" != "i686" ] && [ "$CPU_ARCH" != "i386" ]; then
+                echo "⚠️ WARNING: ReactOS is only supported on x86/x86_64 hardware. Your hardware is $CPU_ARCH."
+                printf "Attempt download anyway? (y/n): "
+                read -r proceed
+                if [ "$proceed" != "y" ] && [ "$proceed" != "Y" ]; then return; fi
+            fi
+
+            if [ "$TOTAL_RAM_MB" -lt 512 ] && [ "$TOTAL_RAM_MB" -gt 0 ]; then
+                echo "⚠️ WARNING: Low RAM (${TOTAL_RAM_MB}MB). ReactOS needs 512MB+."
+                printf "Proceed anyway? (y/n): "
+                read -r proceed
+                if [ "$proceed" != "y" ] && [ "$proceed" != "Y" ]; then return; fi
+            fi
+
+            echo ""
+            echo "[*] Downloading ReactOS ISO..."
+            wget -O /tmp/reactos.zip "https://downloads.sourceforge.net/project/reactos/ReactOS/0.4.14/ReactOS-0.4.14-ISO.zip"
+            if [ $? -eq 0 ]; then
+                echo "[*] Extracting ReactOS zip archive..."
+                if ! command -v unzip >/dev/null 2>&1; then
+                    apk add unzip
+                fi
+                unzip -o /tmp/reactos.zip -d /tmp/
+                ISO_FILE=$(find /tmp -name "ReactOS*.iso" | head -n 1)
+                if [ -n "$ISO_FILE" ]; then
+                    mv "$ISO_FILE" /tmp/target_os.iso
+                    rm -f /tmp/reactos.zip
+                    echo "[+] ReactOS ready at /tmp/target_os.iso"
+                else
+                    echo "[-] Extraction failed: ISO not found in ZIP."
+                fi
+            else
+                echo "[-] Download failed. Check network connection."
+            fi
+            echo "Press Enter to continue..."
+            read -r
+            ;;
+
+        2)
+            # Ubuntu
+            if [ "$TOTAL_RAM_MB" -lt 2048 ] && [ "$TOTAL_RAM_MB" -gt 0 ]; then
+                echo "⚠️ WARNING: Ubuntu needs at least 2GB of RAM. You have ${TOTAL_RAM_MB}MB."
+                printf "Proceed anyway? (y/n): "
+                read -r proceed
+                if [ "$proceed" != "y" ] && [ "$proceed" != "Y" ]; then return; fi
+            fi
+
+            # Select URL based on detected architecture
+            UBUNTU_URL="https://cdimage.ubuntu.com/ubuntu-mini-iso/24.04/LTS/current/ubuntu-mini-iso-24.04-desktop-amd64.iso"
+            if [ "$CPU_ARCH" = "aarch64" ]; then
+                # Fetch ARM64 Ubuntu Server netboot/live-server instead
+                UBUNTU_URL="https://cdimage.ubuntu.com/ubuntu-server/noble/daily-live/current/noble-live-server-arm64.iso"
+            fi
+
+            echo ""
+            echo "[*] Detected $CPU_ARCH architecture. Downloading Ubuntu..."
+            wget -O /tmp/target_os.iso "$UBUNTU_URL"
+            if [ $? -eq 0 ]; then
+                echo "[+] Ubuntu ready at /tmp/target_os.iso"
+            else
+                echo "[-] Download failed."
+            fi
+            echo "Press Enter to continue..."
+            read -r
+            ;;
+
+        3)
+            # Kali Linux
+            if [ "$TOTAL_RAM_MB" -lt 2048 ] && [ "$TOTAL_RAM_MB" -gt 0 ]; then
+                echo "⚠️ WARNING: Kali Linux needs at least 2GB of RAM. You have ${TOTAL_RAM_MB}MB."
+                printf "Proceed anyway? (y/n): "
+                read -r proceed
+                if [ "$proceed" != "y" ] && [ "$proceed" != "Y" ]; then return; fi
+            fi
+
+            KALI_URL="https://cdimage.kali.org/current/kali-linux-current-installer-netinst-amd64.iso"
+            if [ "$CPU_ARCH" = "aarch64" ]; then
+                # Fetch ARM64 Kali netinst
+                KALI_URL="https://cdimage.kali.org/current/kali-linux-current-installer-netinst-arm64.iso"
+            fi
+
+            echo ""
+            echo "[*] Detected $CPU_ARCH architecture. Downloading Kali Linux..."
+            wget -O /tmp/target_os.iso "$KALI_URL"
+            if [ $? -eq 0 ]; then
+                echo "[+] Kali Linux ready at /tmp/target_os.iso"
+            else
+                echo "[-] Download failed."
+            fi
+            echo "Press Enter to continue..."
+            read -r
+            ;;
+        *)
+            return
+            ;;
+    esac
+}
+
+# Run hardware detection once at startup
+detect_hardware
+
+while true; do
+    clear
+    echo "========================================"
+    echo "          Welcome to FsOS               "
+    echo "========================================"
+    echo "  RAM: ${TOTAL_RAM_MB}MB | CPU: $CPU_ARCH"
+    echo "========================================"
+    echo "Please select an option:"
+    echo "  1. Connect to the network (DHCP)"
+    echo "  2. Choose & Download Target OS"
+    echo "  3. Launch Target OS in QEMU"
+    echo "  4. View Hardware Diagnostics"
+    echo "  5. Drop to root shell"
+    echo "  6. Reboot"
+    echo ""
+    printf "Enter your choice [1-6]: "
+    read -r choice
+
+    case "$choice" in
+        1)
+            echo ""
+            echo "[*] Starting networking (udhcpc)..."
+            udhcpc -i eth0
+            echo "[+] Network setup complete."
+            echo "[*] Press Enter to continue..."
+            read -r
+            ;;
+        2)
+            download_os
+            ;;
+        3)
+            echo ""
+            echo "[*] Preparing to launch QEMU..."
+            if [ ! -f /tmp/target_os.iso ]; then
+                echo "[-] Error: Target OS image not found! Please download it first (Option 2)."
+            else
+                echo "[*] Checking if QEMU is installed..."
+                if ! command -v qemu-system-x86_64 >/dev/null 2>&1 && ! command -v qemu-system-aarch64 >/dev/null 2>&1; then
+                    echo "[*] Installing QEMU... (This requires internet)"
+                    setup-apkrepos -1
+                    apk update
+                    if [ "$CPU_ARCH" = "aarch64" ]; then
+                        apk add qemu-system-aarch64
+                    else
+                        apk add qemu-system-x86_64
+                    fi
+                fi
+                
+                echo "[*] Starting virtual machine..."
+                if [ "$CPU_ARCH" = "aarch64" ]; then
+                    qemu-system-aarch64 -m 1024M -M virt -cpu max -bios /usr/share/qemu/bios.bin -cdrom /tmp/target_os.iso -nographic
+                else
+                    qemu-system-x86_64 -m 1024M -cdrom /tmp/target_os.iso -nographic
+                fi
+            fi
+            echo "[*] Press Enter to continue..."
+            read -r
+            ;;
+        4)
+            show_hardware_report
+            ;;
+        5)
+            echo ""
+            echo "[*] Dropping to root shell. Type 'exit' to return to menu."
+            /bin/sh
+            ;;
+        6)
+            echo ""
+            echo "[*] Rebooting system..."
+            reboot
+            ;;
+        *)
+            echo "Invalid option. Please enter a number between 1 and 6."
+            sleep 2
+            ;;
+    esac
+done

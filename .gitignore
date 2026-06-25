@@ -1,5 +1,2 @@
 .env
 .*
-!.gitignore
-*.iso
-modloop-lts
